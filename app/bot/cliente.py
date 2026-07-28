@@ -372,14 +372,14 @@ async def registrar_pedido_bd(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Instructivo que acompaña a la imagen
     instrucciones_pago = (
-        f"✅ *Pedido #{pedido_id} registrado exitosamente*\n"
-        f"🔑 Codigo: `{codigo_seg}`\n"
-        f"💰 *Monto Total: Bs. {total:.2f}*\n\n"
+        f"*Pedido #{pedido_id} registrado exitosamente*\n"
+        f"Codigo: `{codigo_seg}`\n"
+        f"*Monto Total: Bs. {total:.2f}*\n\n"
         "📱 *Escanea el QR adjunto para realizar tu pago:*\n"
         "• Banco: Banco Union\n"
         "• Cuenta: 10000012345678\n"
         "• Titular: Restaurante El Sabor Boliviano\n\n"
-        "📷 *Envía una FOTO de tu comprobante en este chat para procesar tu pedido.*"
+        "*Envía una FOTO de tu comprobante en este chat para procesar tu pedido.*"
     )
 
     # Enviar foto del QR si existe o mensaje simple mediante update.effective_chat
@@ -399,6 +399,7 @@ async def registrar_pedido_bd(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
     return ESPERANDO_COMPROBANTE
+
 
 async def recibir_comprobante(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Descarga la foto del comprobante con proteccion ante cortes de red."""
