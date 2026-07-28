@@ -35,7 +35,11 @@ class Usuario(Base):
     rol = Column(Enum(RolUsuario), default=RolUsuario.CLIENTE)
     activo = Column(Boolean, default=True)
 
-    pedidos = relationship("Pedido", back_populates="cliente")
+    pedidos = relationship(
+        "Pedido",
+        foreign_keys="[Pedido.cliente_id]",
+        back_populates="cliente"
+    )
 
 
 class Plato(Base):

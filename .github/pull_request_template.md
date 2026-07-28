@@ -1,8 +1,8 @@
 ## Descripción del cambio
-<!-- Resume qué cambia y por qué -->
+<!-- Resume que cambia y por que -->
 
 ## Issue asociado
-Cierra #
+Close #
 
 ## ¿Cómo probar los cambios?
 1. 
