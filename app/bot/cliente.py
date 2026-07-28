@@ -21,9 +21,10 @@ from app.core.database import SessionLocal
 from app.core.logica import calcular_total_carrito, validar_stock_disponible
 from app.models.modelos import Usuario, Plato, Pedido, DetallePedido, RolUsuario, EstadoPedido
 
-# Carpeta para almacenar los comprobantes de pago enviados por los clientes
+# Rutas de archivos
 COMPROBANTES_DIR = os.path.join("docs", "comprobantes")
 os.makedirs(COMPROBANTES_DIR, exist_ok=True)
+RUTA_QR_PAGO = os.path.join("docs", "qr_pago.png")
 
 # Estados para la FSM (ConversationHandler)
 (
@@ -280,9 +281,9 @@ async def recibir_ubicacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def registrar_pedido_bd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Persiste el pedido y sus detalles en SQLite adaptado a la BD actual."""
+    """Persiste el pedido en BD, descuenta stock y envia foto de QR para pago."""
     query = update.callback_query
-    if not query or not update.effective_user or context.user_data is None:
+    if not query or not update.effective_user or not update.effective_chat or context.user_data is None:
         return CONFIRMANDO_PEDIDO
 
     await query.answer()
@@ -311,10 +312,8 @@ async def registrar_pedido_bd(update: Update, context: ContextTypes.DEFAULT_TYPE
             db.commit()
             db.refresh(usuario)
 
-        # Generar un codigo de seguimiento unico basado en timestamp
         codigo_seg = f"PED-{int(datetime.now().timestamp())}"
 
-        # Crear registro de Pedido usando los nombres exactos de tu modelo ORM
         nuevo_pedido = Pedido(
             codigo_seguimiento=codigo_seg,
             cliente_id=getattr(usuario, "id"),
@@ -329,7 +328,6 @@ async def registrar_pedido_bd(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         pedido_id = getattr(nuevo_pedido, "id")
 
-        # Crear DetallePedido y descontar stock
         for plato_id, cantidad in carrito.items():
             plato = db.query(Plato).filter(Plato.id == plato_id).first()
             if plato:
@@ -345,7 +343,6 @@ async def registrar_pedido_bd(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 db.add(detalle)
 
-                # Descuento de stock en la BD
                 stock_actual = int(getattr(plato, "stock", 0))
                 setattr(plato, "stock", max(0, stock_actual - cantidad))
 
@@ -361,25 +358,51 @@ async def registrar_pedido_bd(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("Ocurrio un error al registrar tu pedido. Intenta nuevamente.")
         return ConversationHandler.END
 
-    # Mensaje con los datos de pago por QR
+    chat_id = update.effective_chat.id
+
+    # Intentar eliminar el mensaje anterior de forma segura usando bot API
+    if query.message:
+        try:
+            await context.bot.delete_message(
+                chat_id=chat_id,
+                message_id=query.message.message_id,
+            )
+        except Exception:
+            pass
+
+    # Instructivo que acompaña a la imagen
     instrucciones_pago = (
-        f"Pedido #{pedido_id} registrado exitosamente.\n"
-        f"Codigo de Seguimiento: {codigo_seg}\n\n"
-        f"Monto Total: Bs. {total:.2f}\n"
-        "Metodo de Pago: Transferencia QR\n\n"
-        "Datos para la transferencia:\n"
-        "- Banco: Banco Union\n"
-        "- Cuenta: 10000012345678\n"
-        "- Titular: Restaurante El Sabor Boliviano\n\n"
-        "Por favor, envia una FOTO o CAPTURA de pantalla de tu comprobante de pago en este chat para procesar tu entrega."
+        f"*Pedido #{pedido_id} registrado exitosamente*\n"
+        f"Codigo: `{codigo_seg}`\n"
+        f"*Monto Total: Bs. {total:.2f}*\n\n"
+        "📱 *Escanea el QR adjunto para realizar tu pago:*\n"
+        "• Banco: Banco Union\n"
+        "• Cuenta: 10000012345678\n"
+        "• Titular: Restaurante El Sabor Boliviano\n\n"
+        "*Envía una FOTO de tu comprobante en este chat para procesar tu pedido.*"
     )
 
-    await query.edit_message_text(instrucciones_pago)
+    # Enviar foto del QR si existe o mensaje simple mediante update.effective_chat
+    if os.path.exists(RUTA_QR_PAGO):
+        with open(RUTA_QR_PAGO, "rb") as foto_qr:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=foto_qr,
+                caption=instrucciones_pago,
+                parse_mode="Markdown",
+            )
+    else:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=instrucciones_pago,
+            parse_mode="Markdown",
+        )
+
     return ESPERANDO_COMPROBANTE
 
 
 async def recibir_comprobante(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Descarga la foto del comprobante enviada por el cliente y actualiza la BD."""
+    """Descarga la foto del comprobante con proteccion ante cortes de red."""
     if not update.message or not update.message.photo or context.user_data is None:
         return ESPERANDO_COMPROBANTE
 
@@ -389,14 +412,24 @@ async def recibir_comprobante(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     foto = update.message.photo[-1]
-    archivo_foto = await context.bot.get_file(foto.file_id)
 
-    nombre_archivo = f"comprobante_pedido_{pedido_id}.jpg"
-    ruta_guardado = os.path.join(COMPROBANTES_DIR, nombre_archivo)
+    # Descarga blindada ante micro-cortes de red
+    try:
+        archivo_foto = await context.bot.get_file(foto.file_id)
+        nombre_archivo = f"comprobante_pedido_{pedido_id}.jpg"
+        ruta_guardado = os.path.join(COMPROBANTES_DIR, nombre_archivo)
 
-    await archivo_foto.download_to_drive(ruta_guardado)
+        await archivo_foto.download_to_drive(ruta_guardado)
 
-    # Actualizar la ruta del comprobante en la columna comprobante_pago
+    except Exception as e:
+        print(f"Aviso: Reintento de red al descargar comprobante: {e}")
+        await update.message.reply_text(
+            "Hubo un problema temporal de conexion al descargar la imagen.\n"
+            "Por favor, vuelve a enviar la foto de tu comprobante."
+        )
+        return ESPERANDO_COMPROBANTE
+
+    # Actualizar ruta en SQLite
     db = SessionLocal()
     pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
     if pedido:
@@ -508,7 +541,6 @@ def crear_aplicacion_bot(token: str) -> Application:
             ],
         },
         fallbacks=[CommandHandler("cancelar", cancelar_flujo)],
-        per_message=False,
     )
 
     app.add_handler(conv_handler)
