@@ -1,6 +1,5 @@
 from app.bot.cliente import crear_aplicacion_bot
 
-# El TOKEN DEBE ir entre comillas
 TOKEN = "8721377188:AAEfXfkEQOkFSseR1nFpessfq94JTKhiIs4"
 
 if __name__ == "__main__":
