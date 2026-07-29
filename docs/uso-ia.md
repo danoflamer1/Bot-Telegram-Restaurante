@@ -10,6 +10,7 @@ Herramientas utilizadas: Gemini (Google)[cite: 1].
 | 2026-07-28 | #15, #16, #17, #18 | Maquina de estados configurada, carrito de compras interactivo y captura de ubicacion GPS | Estados, calculo de totales, filtros de ubicacion y cancelacion | Pruebas de flujo completo de seleccion, validacion de stock y recepcion de coordenadas | Ajuste de respuestas para teclados nativos e inline |
 | 2026-07-28 | #19, #20, #21, #22 | Persistencia de pedidos, descuento de stock, datos QR y captura de comprobantes de pago | Manejo de transacciones SQLAlchemy, flujo de descarga de imagenes y estados FSM | Verificacion de guardado de comprobantes en disco y registros en SQLite con descontado de stock | Optimizacion de nombres de archivo de comprobante por ID de pedido |
 | 2026-07-28 | #24, #25, #26, #27, #28, #29, #30, #31 | Enrutador multirrol, notificaciones admin y panel de repartidor | Implementacion de router por BD, envio asincrono de notificaciones con foto y handlers de delivery | Verificacion de transiciones de estado de pedido (PENDIENTE_PAGO -> EN_PREPARACION -> ASIGNADO -> EN_CAMINO -> ENTREGADO) | Arquitectura modular desacoplada en app/bot/ |
+| 2026-07-28 | #23 | Envio de foto QR y tolerancia a fallos de red en comprobantes | Integracion de send_photo con captura de excepciones httpx.ConnectError | Verificacion de reintento de foto en chat de Telegram y guardado en SQLite | Optimizacion UX mediante eliminacion dinamica del mensaje anterior |
 ## Dónde NO se usó IA
 [Módulos o decisiones resueltas integramente por el postulante.][cite: 1]
 
