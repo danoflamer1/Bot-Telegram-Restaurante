@@ -87,26 +87,16 @@ class Usuario(Base):
 
 
 class Plato(Base):
-
     __tablename__ = "platos"
 
-
-
     id = Column(Integer, primary_key=True, index=True)
-
-    nombre = Column(String, nullable=False)
-
+    nombre = Column(String(100), nullable=False)
     descripcion = Column(Text, nullable=True)
-
     precio = Column(Float, nullable=False)
-
     stock = Column(Integer, default=0)
-
-    fecha_menu = Column(String, nullable=False)  # Formato YYYY-MM-DD
-
+    fecha_menu = Column(String(10), nullable=False)
     disponible = Column(Boolean, default=True)
-
-
+    imagen_path = Column(String(255), nullable=True)
 
 
 

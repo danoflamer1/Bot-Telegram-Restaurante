@@ -1,8 +1,29 @@
-"""Módulo enrutador principal que gestiona el acceso según el rol del usuario."""
-from telegram import Update
+"""Módulo enrutador principal con teclados persistentes por rol."""
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from app.core.database import SessionLocal
 from app.models.modelos import Usuario, RolUsuario
+
+
+def obtener_teclado_por_rol(rol: RolUsuario) -> ReplyKeyboardMarkup:
+    """Devuelve el teclado fijo inferior en Telegram segun el rol del usuario."""
+    if rol == RolUsuario.ADMINISTRADOR:
+        teclado = [
+            ["📥 Pagos Pendientes", "🍔 Gestionar Menú"],
+            ["➕ Nuevo Platillo", "📊 Reporte de Ventas"],
+        ]
+    elif rol == RolUsuario.REPARTIDOR:
+        teclado = [
+            ["🛵 Pedidos Pendientes"],
+        ]
+    else:
+        # CLIENTE
+        teclado = [
+            ["🍔 Ver Menú del Día", "🛒 Mi Carrito"],
+            ["❓ Ayuda"],
+        ]
+
+    return ReplyKeyboardMarkup(teclado, resize_keyboard=True)
 
 
 def obtener_o_registrar_usuario(telegram_id: str, nombre: str) -> Usuario:
@@ -23,33 +44,24 @@ def obtener_o_registrar_usuario(telegram_id: str, nombre: str) -> Usuario:
 
 
 async def comando_start_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Identifica el rol del usuario y muestra el mensaje inicial de bienvenida."""
+    """Intercepta el comando /start o mensajes generales y despliega el teclado persistente."""
     if not update.effective_user or not update.message:
         return ConversationHandler.END
 
     user = update.effective_user
-    nombre_completo = getattr(user, "full_name", "Usuario")
+    nombre = getattr(user, "first_name", "Usuario")
+    nombre_completo = getattr(user, "full_name", nombre)
 
     usuario = obtener_o_registrar_usuario(str(user.id), nombre_completo)
     rol = getattr(usuario, "rol", RolUsuario.CLIENTE)
+    teclado = obtener_teclado_por_rol(rol)
 
     if rol == RolUsuario.ADMINISTRADOR:
-        mensaje = (
-            f"👑 *Bienvenido al Panel de Administracion*, {nombre_completo}.\n\n"
-            "Desde este chat recibiras notificaciones automaticas de comprobantes de pago "
-            "y podras aprobar o rechazar pedidos en tiempo real."
-        )
-        await update.message.reply_text(mensaje, parse_mode="Markdown")
-        return ConversationHandler.END
-
+        mensaje = f"👑 *Panel de Administracion - Restaurante El Sabor Boliviano*\nHola {nombre}. Selecciona una opcion del menu inferior:"
     elif rol == RolUsuario.REPARTIDOR:
-        mensaje = (
-            f"🛵 *Bienvenido al Panel de Delivery*, {nombre_completo}.\n\n"
-            "Usa el comando /pedidos_pendientes para ver los pedidos en preparacion y listos para entregar."
-        )
-        await update.message.reply_text(mensaje, parse_mode="Markdown")
-        return ConversationHandler.END
+        mensaje = f"🛵 *Panel de Delivery*\nHola {nombre}. Presiona el boton inferior para consultar entregas pendientes:"
+    else:
+        mensaje = f"👋 ¡Hola, {nombre}! Bienvenido a nuestro restaurante.\nUsa el menu interactivo de abajo para realizar tu pedido:"
 
-    # Si es CLIENTE, redirige al comando_start normal del cliente
-    from app.bot.cliente import comando_start
-    return await comando_start(update, context)
+    await update.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
+    return ConversationHandler.END
