@@ -83,14 +83,11 @@ async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensaje, reply_markup=reply_markup)
     return SELECCIONANDO_PLATOS
 
-
 async def mostrar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Consulta la BD y despliega los platos con sus opciones de agregado."""
-    query = update.callback_query
-    if not query:
+    """Despliega los platillos disponibles con fotos reales y boton de agregar."""
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if not chat_id:
         return SELECCIONANDO_PLATOS
-
-    await query.answer()
 
     db = SessionLocal()
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -107,31 +104,57 @@ async def mostrar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.close()
 
     if not platos:
-        await query.edit_message_text(
-            f"No hay platos disponibles en el menu para hoy ({fecha_hoy}).\n"
-            "Por favor, intenta de nuevo mas tarde."
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"No hay platillos disponibles en el menu para hoy ({fecha_hoy}).",
         )
-        return ConversationHandler.END
+        return SELECCIONANDO_PLATOS
 
     carrito = context.user_data.get("carrito", {}) if context.user_data is not None else {}
-    mensaje = f"Menu del Dia ({fecha_hoy})\nSelecciona un plato para agregarlo al carrito:\n"
-    teclado = []
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"🍽️ *Menú del Día ({fecha_hoy})*\nSelecciona los platillos que deseas agregar a tu carrito:",
+        parse_mode="Markdown",
+    )
 
     for plato in platos:
-        cant_en_carrito = carrito.get(plato.id, 0)
-        precio_val = getattr(plato, "precio", 0.0)
-        texto_boton = f"{plato.nombre} - Bs. {precio_val:.2f} [En carrito: {cant_en_carrito}]"
-        teclado.append(
-            [InlineKeyboardButton(texto_boton, callback_data=f"agregar_{plato.id}")]
+        p_id = getattr(plato, "id")
+        nombre = getattr(plato, "nombre")
+        desc = getattr(plato, "descripcion", "")
+        precio = float(getattr(plato, "precio", 0.0))
+        stock = int(getattr(plato, "stock", 0))
+        img_path = getattr(plato, "imagen_path", None)
+        cant_carrito = carrito.get(p_id, 0)
+
+        texto_card = (
+            f"🍲 *{nombre}*\n"
+            f"📝 _{desc}_\n"
+            f"💰 *Precio:* Bs. {precio:.2f}\n"
+            f"📦 *Stock disponible:* {stock} unidades\n"
+            f"🛒 *En tu carrito:* {cant_carrito}"
         )
 
-    if carrito:
-        teclado.append([InlineKeyboardButton("Ver Carrito / Confirmar", callback_data="ver_carrito")])
+        teclado = [[InlineKeyboardButton("➕ Agregar al Carrito", callback_data=f"agregar_{p_id}")]]
+        reply_markup = InlineKeyboardMarkup(teclado)
 
-    teclado.append([InlineKeyboardButton("Volver al Inicio", callback_data="inicio")])
-    reply_markup = InlineKeyboardMarkup(teclado)
+        if img_path and os.path.exists(str(img_path)):
+            with open(str(img_path), "rb") as foto:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=foto,
+                    caption=texto_card,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown",
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=texto_card,
+                reply_markup=reply_markup,
+                parse_mode="Markdown",
+            )
 
-    await query.edit_message_text(mensaje, reply_markup=reply_markup)
     return SELECCIONANDO_PLATOS
 
 
