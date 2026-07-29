@@ -10,7 +10,7 @@ def obtener_teclado_por_rol(rol: RolUsuario) -> ReplyKeyboardMarkup:
     if rol == RolUsuario.ADMINISTRADOR:
         teclado = [
             ["📥 Pagos Pendientes", "🍔 Gestionar Menú"],
-            ["➕ Nuevo Platillo"],
+            ["➕ Nuevo Platillo", "📊 Reporte de Ventas"], # ⚡ AQUÍ ESTÁ EL BOTÓN AÑADIDO
         ]
     elif rol == RolUsuario.REPARTIDOR:
         teclado = [
@@ -66,7 +66,7 @@ async def comando_start_router(update: Update, context: ContextTypes.DEFAULT_TYP
         mensaje = (
             f"👑 *¡Panel de Administración — Chef {nombre}!* 👨‍🍳\n\n"
             "Usa los botones del menú de abajo para revisar los pagos recibidos, "
-            "gestionar el stock o publicar nuevos platos:"
+            "gestionar el stock, publicar nuevos platos o ver reportes:"
         )
     elif rol == RolUsuario.REPARTIDOR:
         mensaje = (
