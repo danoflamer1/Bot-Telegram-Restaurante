@@ -554,11 +554,6 @@ def crear_aplicacion_bot(token: str) -> Application:
     from app.bot.admin import registrar_handlers_admin
     from app.bot.repartidor import registrar_handlers_repartidor
 
-    # 1. Registrar primero los handlers de Admin y Repartidor para mayor prioridad
-    registrar_handlers_admin(app)
-    registrar_handlers_repartidor(app)
-
-    # 2. Registrar la conversacion principal de Cliente e inicio
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", comando_start_router),
@@ -595,6 +590,12 @@ def crear_aplicacion_bot(token: str) -> Application:
         per_message=False,
     )
 
+    # ⚡ EL ORDEN ES CRÍTICO: 
+    # 1. Primero registramos la máquina de estados del cliente
     app.add_handler(conv_handler)
+
+    # 2. Después registramos Admin y Repartidor como opciones globales
+    registrar_handlers_admin(app)
+    registrar_handlers_repartidor(app)
 
     return app

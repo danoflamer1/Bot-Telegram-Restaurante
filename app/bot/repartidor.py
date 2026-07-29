@@ -1,5 +1,6 @@
 """Módulo de repartidor: Consulta de pedidos, actualización de entrega y GPS."""
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import TypeHandler
 from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
@@ -96,10 +97,15 @@ async def callback_tomar_pedido(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         db.close()
 
+from telegram import ReplyKeyboardMarkup, KeyboardButton
+from app.bot.router import obtener_teclado_por_rol # Para restaurar el teclado luego
+
 async def callback_en_camino(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if not query or not query.data:
+    if not query or not query.data or not update.effective_chat:
         return
+        
+    chat_seguro_id = update.effective_chat.id
     await query.answer()
     pedido_id = int(query.data.split("_")[1])
 
@@ -112,21 +118,118 @@ async def callback_en_camino(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         teclado = [[InlineKeyboardButton("✅ Entregado", callback_data=f"entregado_{pedido_id}")]]
         await query.edit_message_text(
-            f"🚀 <b>Pedido #{pedido_id} marcado como EN CAMINO.</b>\nEnvíale tu ubicación GPS actual al cliente y luego presiona Entregado.",
+            f"🚀 <b>Pedido #{pedido_id} marcado como EN CAMINO.</b>\nCuando llegues, presiona Entregado.",
             reply_markup=InlineKeyboardMarkup(teclado),
             parse_mode="HTML",
         )
 
+        # ⚡ INSTRUCCIÓN AL REPARTIDOR PARA QUE USE EL GPS EN VIVO NATIVO
+        instrucciones_gps = (
+            "👇 <b>PASO REQUERIDO PARA RASTREO:</b>\n\n"
+            "1. Toca el ícono del clip (📎) a la izquierda de la barra de chat.\n"
+            "2. Selecciona <b>Ubicación</b>.\n"
+            "3. Presiona <b>Compartir ubicación en tiempo real</b> (por 1 hora).\n\n"
+            "<i>El cliente podrá ver tu movimiento en vivo en el mapa de Telegram.</i>"
+        )
+        
+        await context.bot.send_message(chat_id=chat_seguro_id, text=instrucciones_gps, parse_mode="HTML")
+
         try:
             from app.bot.cliente import notificar_cliente_cambio_estado
             await notificar_cliente_cambio_estado(
-                context, pedido_id, "🛵💨 <b>¡Tu pedido está EN CAMINO!</b>\nEl repartidor ya salió del restaurante."
+                context, pedido_id, "🛵💨 <b>¡Tu pedido está EN CAMINO!</b>\nEl repartidor ya salió. En breves segundos recibirás su mapa en tiempo real."
             )
-        except Exception as e:
-            print(f"Aviso notificación cliente: {e}")
+        except Exception:
+            pass
     else:
         db.close()
 
+
+async def rastreador_ubicacion_en_vivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Atrapa tanto el primer mensaje de GPS en vivo como sus actualizaciones continuas."""
+    # En Telegram el GPS en vivo manda updates constantemente como "edited_message"
+    msg = update.message or update.edited_message
+    
+    if not msg or not getattr(msg, "location", None) or not update.effective_user:
+        return
+
+    user_id = update.effective_user.id
+    db = SessionLocal()
+    
+    repartidor = db.query(Usuario).filter(Usuario.telegram_id == str(user_id)).first()
+    if not repartidor or getattr(repartidor, "rol") != RolUsuario.REPARTIDOR:
+        db.close()
+        return
+
+    pedido = db.query(Pedido).filter(
+        Pedido.repartidor_id == getattr(repartidor, "id"),
+        Pedido.estado == EstadoPedido.EN_CAMINO
+    ).first()
+
+    if not pedido:
+        db.close()
+        return
+        
+    cliente = db.query(Usuario).filter(Usuario.id == getattr(pedido, "cliente_id")).first()
+    db.close()
+    
+    if not cliente or not getattr(cliente, "telegram_id"):
+        return
+        
+    chat_cliente = int(getattr(cliente, "telegram_id"))
+    lat = msg.location.latitude
+    lon = msg.location.longitude
+    
+    # ⚡ Si es un mensaje nuevo (acaba de presionar "Compartir ubicación en tiempo real")
+    if update.message:
+        live_period = getattr(msg.location, "live_period", None)
+        
+        if live_period:
+            # Enviamos el mapa nativo que se mueve solo al cliente
+            sent_msg = await context.bot.send_location(
+                chat_id=chat_cliente,
+                latitude=lat,
+                longitude=lon,
+                live_period=live_period
+            )
+            # Guardamos el ID del mensaje enviado al cliente para actualizarlo luego
+            context.bot_data[f"tracking_{getattr(pedido, 'id')}"] = {
+                "chat_id": chat_cliente,
+                "message_id": sent_msg.message_id
+            }
+            await msg.reply_text("📡 <b>Señal GPS conectada.</b> El cliente ahora te ve moverse en el mapa.", parse_mode="HTML")
+        else:
+            # Mandó ubicación estática normal (sin movimiento)
+            enlace = f"https://www.google.com/maps?q={lat},{lon}"
+            await context.bot.send_message(chat_cliente, f"📍 El repartidor actualizó su posición (estática):\n<a href='{enlace}'>Ver Mapa</a>", parse_mode="HTML")
+            await msg.reply_text("✅ Ubicación estática enviada. Para que se mueva sola usa 'Compartir ubicación en tiempo real'.")
+            
+    # ⚡ Si es una actualización (el repartidor caminó o manejó unos metros)
+    elif update.edited_message:
+        tracking = context.bot_data.get(f"tracking_{getattr(pedido, 'id')}")
+        if tracking:
+            try:
+                # Movemos el pin del cliente sin enviarle un mensaje nuevo
+                await context.bot.edit_message_live_location(
+                    chat_id=tracking["chat_id"],
+                    message_id=tracking["message_id"],
+                    latitude=lat,
+                    longitude=lon
+                )
+            except Exception:
+                pass # Silenciamos errores por si la ubicación no cambió lo suficiente
+
+# En tu función registrar_handlers_repartidor, quitas el de filters.LOCATION y pones:
+def registrar_handlers_repartidor(app: Application) -> None:
+    app.add_handler(CommandHandler("pedidos_pendientes", comando_pedidos_pendientes))
+    app.add_handler(MessageHandler(filters.Regex("^🛵 Pedidos Pendientes$"), comando_pedidos_pendientes))
+    
+    # ⚡ Usamos TypeHandler porque es 100% seguro para atrapar el movimiento en vivo
+    app.add_handler(TypeHandler(Update, rastreador_ubicacion_en_vivo))
+    
+    app.add_handler(CallbackQueryHandler(callback_tomar_pedido, pattern="^tomar_"))
+    app.add_handler(CallbackQueryHandler(callback_en_camino, pattern="^encamino_"))
+    app.add_handler(CallbackQueryHandler(callback_entregado, pattern="^entregado_"))
 async def callback_entregado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not query.data:
@@ -152,63 +255,11 @@ async def callback_entregado(update: Update, context: ContextTypes.DEFAULT_TYPE)
             print(f"Aviso notificación cliente: {e}")
     else:
         db.close()
-
-# --- NUEVO: Rastreo GPS (Issue #41) ---
-async def recibir_ubicacion_gps(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Enruta la ubicación enviada por el repartidor al cliente del pedido en camino."""
-    if not update.message or not update.message.location or not update.effective_user:
-        return
-
-    lat = update.message.location.latitude
-    lon = update.message.location.longitude
-    db = SessionLocal()
-
-    repartidor = db.query(Usuario).filter(Usuario.telegram_id == str(update.effective_user.id)).first()
-    if not repartidor:
-        db.close()
-        return
-
-    # Buscar el pedido EN CAMINO de este repartidor
-    pedido = db.query(Pedido).filter(
-        Pedido.repartidor_id == getattr(repartidor, "id"),
-        Pedido.estado == EstadoPedido.EN_CAMINO
-    ).first()
-
-    if pedido:
-        pedido_id = getattr(pedido, "id")
-        cliente_id = getattr(pedido, "usuario_id") # O cliente_id dependiendo de tu modelo exacto
-        cliente = db.query(Usuario).filter(Usuario.id == cliente_id).first()
-        db.close()
-
-        if cliente and getattr(cliente, "telegram_id"):
-            chat_cliente = int(getattr(cliente, "telegram_id"))
-            enlace_mapa = f"https://www.google.com/maps?q={lat},{lon}"
-            
-            mensaje_cliente = (
-                f"📍 <b>¡TU PEDIDO ESTÁ CERCA!</b>\n\n"
-                f"El repartidor ha actualizado su posición en tiempo real para el Pedido #{pedido_id}.\n\n"
-                f"🗺️ <a href='{enlace_mapa}'>Ver ubicación del repartidor en Google Maps</a>"
-            )
-            
-            try:
-                await context.bot.send_message(
-                    chat_id=chat_cliente,
-                    text=mensaje_cliente,
-                    parse_mode="HTML",
-                    disable_web_page_preview=False
-                )
-                await update.message.reply_text("✅ Ubicación enviada al cliente con éxito.")
-            except Exception as e:
-                print(f"Error enviando GPS al cliente: {e}")
-    else:
-        db.close()
-        await update.message.reply_text("📍 Ubicación recibida, pero no tienes pedidos en estado 'EN CAMINO'.")
-
 def registrar_handlers_repartidor(app: Application) -> None:
     app.add_handler(CommandHandler("pedidos_pendientes", comando_pedidos_pendientes))
     app.add_handler(MessageHandler(filters.Regex("^🛵 Pedidos Pendientes$"), comando_pedidos_pendientes))
     # ⚡ Escucha de ubicación para reenviar al cliente (Issue #41)
-    app.add_handler(MessageHandler(filters.LOCATION, recibir_ubicacion_gps))
+    app.add_handler(MessageHandler(filters.LOCATION, rastreador_ubicacion_en_vivo))
     
     app.add_handler(CallbackQueryHandler(callback_tomar_pedido, pattern="^tomar_"))
     app.add_handler(CallbackQueryHandler(callback_en_camino, pattern="^encamino_"))
