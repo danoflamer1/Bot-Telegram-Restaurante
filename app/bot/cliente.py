@@ -1,4 +1,5 @@
 import os
+from app.bot.admin import notificar_admin_nuevo_comprobante
 from datetime import datetime
 from telegram import (
     Update,
@@ -435,6 +436,16 @@ async def recibir_comprobante(update: Update, context: ContextTypes.DEFAULT_TYPE
     if pedido:
         setattr(pedido, "comprobante_pago", ruta_guardado)
         db.commit()
+        # Actualizar ruta en SQLite
+    db = SessionLocal()
+    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
+    if pedido:
+        setattr(pedido, "comprobante_pago", ruta_guardado)
+        db.commit()
+    db.close()
+
+    # Disparar notificacion automatica al administrador
+    await notificar_admin_nuevo_comprobante(context, pedido_id)
     db.close()
 
     context.user_data.clear()
@@ -514,6 +525,46 @@ async def callback_inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def crear_aplicacion_bot(token: str) -> Application:
+    """Configura e inicializa la aplicacion unificada del bot (Issue #31)."""
+    app = Application.builder().token(token).build()
+
+    from app.bot.router import comando_start_router
+    from app.bot.admin import registrar_handlers_admin
+    from app.bot.repartidor import registrar_handlers_repartidor
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", comando_start_router)],
+        states={
+            SELECCIONANDO_PLATOS: [
+                CallbackQueryHandler(mostrar_menu, pattern="^ver_menu$"),
+                CallbackQueryHandler(agregar_al_carrito, pattern="^agregar_"),
+                CallbackQueryHandler(ver_carrito, pattern="^ver_carrito$"),
+                CallbackQueryHandler(vaciar_carrito, pattern="^vaciar_carrito$"),
+                CallbackQueryHandler(solicitar_ubicacion, pattern="^pedir_ubicacion$"),
+                CallbackQueryHandler(callback_ayuda, pattern="^ver_ayuda$"),
+                CallbackQueryHandler(callback_inicio, pattern="^inicio$"),
+            ],
+            SOLICITANDO_UBICACION: [
+                MessageHandler(filters.LOCATION, recibir_ubicacion),
+            ],
+            CONFIRMANDO_PEDIDO: [
+                CallbackQueryHandler(registrar_pedido_bd, pattern="^confirmar_pedido_final$"),
+                CallbackQueryHandler(cancelar_flujo, pattern="^cancelar_pedido$"),
+            ],
+            ESPERANDO_COMPROBANTE: [
+                MessageHandler(filters.PHOTO, recibir_comprobante),
+            ],
+        },
+        fallbacks=[CommandHandler("cancelar", cancelar_flujo)],
+    )
+
+    app.add_handler(conv_handler)
+
+    # Registrar handlers de Admin y Repartidor
+    registrar_handlers_admin(app)
+    registrar_handlers_repartidor(app)
+
+    return app
     """Configura e inicializa la aplicacion del bot con FSM ConversationHandler."""
     app = Application.builder().token(token).build()
 
