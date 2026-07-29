@@ -1,4 +1,4 @@
-"""Módulo de administración avanzada: Notificación de comprobantes, FSM nuevo plato con foto, gestión de stock y pagos."""
+"""Módulo de administración avanzada: Notificación de comprobantes, FSM nuevo plato, menú global y reportes."""
 import os
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,22 +13,13 @@ from telegram.ext import (
 from app.core.database import SessionLocal
 from app.models.modelos import Pedido, Usuario, Plato, RolUsuario, EstadoPedido
 
-# Directorio para guardar imagenes de platillos
 PLATOS_DIR = os.path.join("docs", "platos")
 os.makedirs(PLATOS_DIR, exist_ok=True)
 
-# Estados FSM para crear un nuevo platillo
-(
-    NOMBRE_PLATO,
-    DESCRIPCION_PLATO,
-    PRECIO_STOCK_PLATO,
-    FOTO_PLATO,
-) = range(10, 14)
+(NOMBRE_PLATO, DESCRIPCION_PLATO, PRECIO_STOCK_PLATO, FOTO_PLATO) = range(10, 14)
 
-
-# --- 1. NOTIFICACIÓN AUTOMÁTICA AL ADMIN (Mantenida intacta) ---
+# --- 1. NOTIFICACIÓN AUTOMÁTICA AL ADMIN (Refactor HTML - Issue #38) ---
 async def notificar_admin_nuevo_comprobante(context: ContextTypes.DEFAULT_TYPE, pedido_id: int):
-    """Envia una notificacion con la foto del comprobante a todos los administradores."""
     db = SessionLocal()
     admins = db.query(Usuario).filter(Usuario.rol == RolUsuario.ADMINISTRADOR).all()
     pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
@@ -43,11 +34,11 @@ async def notificar_admin_nuevo_comprobante(context: ContextTypes.DEFAULT_TYPE, 
     db.close()
 
     texto_notificacion = (
-        f"🚨 *NUEVO COMPROBANTE DE PAGO RECEPCIONADO*\n\n"
-        f"📦 *Pedido:* #{pedido_id}\n"
-        f"🔑 *Codigo:* `{codigo}`\n"
-        f"💰 *Monto Total:* Bs. {total:.2f}\n\n"
-        "Revisa la imagen del comprobante y selecciona una accion:"
+        f"🚨 <b>NUEVO COMPROBANTE DE PAGO RECEPCIONADO</b>\n\n"
+        f"📦 <b>Pedido:</b> #{pedido_id}\n"
+        f"🔑 <b>Código:</b> <code>{codigo}</code>\n"
+        f"💰 <b>Monto Total:</b> Bs. {total:.2f}\n\n"
+        "Revisa la imagen del comprobante y selecciona una acción:"
     )
 
     teclado = [
@@ -69,22 +60,20 @@ async def notificar_admin_nuevo_comprobante(context: ContextTypes.DEFAULT_TYPE, 
                             photo=foto,
                             caption=texto_notificacion,
                             reply_markup=reply_markup,
-                            parse_mode="Markdown",
+                            parse_mode="HTML",
                         )
                 else:
                     await context.bot.send_message(
                         chat_id=int(telegram_id),
                         text=texto_notificacion,
                         reply_markup=reply_markup,
-                        parse_mode="Markdown",
+                        parse_mode="HTML",
                     )
             except Exception as e:
-                print(f"Error enviando notificacion a admin {telegram_id}: {e}")
+                print(f"Error enviando notificación a admin {telegram_id}: {e}")
 
-
-# --- 2. BANDEJA DE PAGOS PENDIENTES (Botón '📥 Pagos Pendientes') ---
+# --- 2. BANDEJA DE PAGOS PENDIENTES (Refactor HTML) ---
 async def ver_pagos_pendientes_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muestra la lista de comprobantes que requieren revision del administrador."""
     if not update.message:
         return
 
@@ -93,7 +82,7 @@ async def ver_pagos_pendientes_admin(update: Update, context: ContextTypes.DEFAU
     db.close()
 
     if not pedidos:
-        await update.message.reply_text("✅ No hay comprobantes de pago pendientes de revision.")
+        await update.message.reply_text("✅ <b>No hay comprobantes de pago pendientes de revisión.</b>", parse_mode="HTML")
         return
 
     for p in pedidos:
@@ -103,10 +92,10 @@ async def ver_pagos_pendientes_admin(update: Update, context: ContextTypes.DEFAU
         ruta = str(getattr(p, "comprobante_pago", ""))
 
         texto = (
-            f"📦 *Pedido #{p_id}*\n"
-            f"🔑 Codigo: `{codigo}`\n"
+            f"📦 <b>Pedido #{p_id}</b>\n"
+            f"🔑 Código: <code>{codigo}</code>\n"
             f"💰 Monto Total: Bs. {total:.2f}\n"
-            "Estado: Esperando Aprobacion"
+            "📌 Estado: <b>Esperando Aprobación</b>"
         )
         teclado = [
             [
@@ -118,74 +107,90 @@ async def ver_pagos_pendientes_admin(update: Update, context: ContextTypes.DEFAU
 
         if os.path.exists(ruta):
             with open(ruta, "rb") as foto:
-                await update.message.reply_photo(photo=foto, caption=texto, reply_markup=markup, parse_mode="Markdown")
+                await update.message.reply_photo(photo=foto, caption=texto, reply_markup=markup, parse_mode="HTML")
         else:
-            await update.message.reply_text(texto, reply_markup=markup, parse_mode="Markdown")
+            await update.message.reply_text(texto, reply_markup=markup, parse_mode="HTML")
 
 
-# --- 3. GESTIÓN DE MENÚ Y STOCK (Botón '🍔 Gestionar Menú') ---
-async def gestionar_menu_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Despliega los platos del dia para que el Admin alterne disponibilidad o aumente stock."""
+# --- 3. GESTIÓN DE MENÚ GLOBAL (Issue #39) ---
+async def gestionar_menu_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra TODOS los platos (históricos y actuales) y permite gestionarlos."""
     if not update.message:
         return
 
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
     db = SessionLocal()
-    platos = db.query(Plato).filter(Plato.fecha_menu == fecha_hoy).all()
+    platos = db.query(Plato).order_by(Plato.id.desc()).all()
     db.close()
 
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+
     if not platos:
-        await update.message.reply_text(f"No hay platillos creados para la fecha de hoy ({fecha_hoy}).")
+        await update.message.reply_text("📋 <b>Catálogo Vacío.</b> No hay platillos registrados.", parse_mode="HTML")
         return
 
-    for plato in platos:
-        p_id = getattr(plato, "id")
-        nombre = getattr(plato, "nombre")
-        stock = int(getattr(plato, "stock", 0))
-        disp = bool(getattr(plato, "disponible", True))
+    await update.message.reply_text(f"🍔 <b>CATÁLOGO GLOBAL DE PLATILLOS</b>\n📅 <i>Menú activo: {fecha_hoy}</i>", parse_mode="HTML")
 
-        estado_txt = "🟢 Disponible" if disp else "🔴 Pausado"
-        texto = f"🍔 *{nombre}*\nEstado: {estado_txt}\nStock: {stock} unidades"
+    for p in platos:
+        p_id = getattr(p, "id")
+        nombre = getattr(p, "nombre")
+        precio = float(getattr(p, "precio", 0.0))
+        stock = int(getattr(p, "stock", 0))
+        disp = bool(getattr(p, "disponible", True))
+        fecha_menu = str(getattr(p, "fecha_menu", ""))
 
-        btn_estado = "Pausar ⏸️" if disp else "Activar 🟢"
+        esta_activo_hoy = disp and (fecha_menu == fecha_hoy)
+
+        if esta_activo_hoy:
+            estado_txt = "✅ <b>HABILITADO HOY</b>"
+            btn_estado = "❌ Deshabilitar"
+        else:
+            estado_txt = "❌ <b>DESHABILITADO</b>"
+            btn_estado = "✅ Habilitar para Hoy"
+
+        texto = f"🍲 <b>{nombre}</b>\n💰 Precio: Bs. {precio:.2f} | 📦 Stock: {stock}\n📌 Estado: {estado_txt}"
+
         teclado = [
             [
                 InlineKeyboardButton(btn_estado, callback_data=f"toggle_{p_id}"),
                 InlineKeyboardButton("➕ 5 Stock", callback_data=f"addstock_{p_id}_5"),
             ]
         ]
-        await update.message.reply_text(texto, reply_markup=InlineKeyboardMarkup(teclado), parse_mode="Markdown")
+        await update.message.reply_text(texto, reply_markup=InlineKeyboardMarkup(teclado), parse_mode="HTML")
 
 
 async def callback_toggle_disponible(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Alterna el estado disponible de un plato."""
     query = update.callback_query
     if not query or not query.data:
         return
-
     await query.answer()
     plato_id = int(query.data.split("_")[1])
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
 
     db = SessionLocal()
     plato = db.query(Plato).filter(Plato.id == plato_id).first()
     if plato:
-        nuevo_val = not bool(getattr(plato, "disponible"))
-        setattr(plato, "disponible", nuevo_val)
+        esta_activo_hoy = bool(getattr(plato, "disponible")) and str(getattr(plato, "fecha_menu")) == fecha_hoy
+        
+        if esta_activo_hoy:
+            setattr(plato, "disponible", False)
+            estado_txt = "❌ DESHABILITADO"
+        else:
+            setattr(plato, "disponible", True)
+            setattr(plato, "fecha_menu", fecha_hoy)
+            if getattr(plato, "stock", 0) <= 0:
+                setattr(plato, "stock", 10)
+            estado_txt = "✅ HABILITADO PARA HOY"
+            
         db.commit()
         db.close()
-
-        estado_txt = "🟢 Disponible" if nuevo_val else "🔴 Pausado"
-        await query.edit_message_text(f"Estado actualizado a: {estado_txt}")
+        await query.edit_message_text(f"📌 Estado actualizado a: <b>{estado_txt}</b>", parse_mode="HTML")
     else:
         db.close()
 
-
 async def callback_add_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Suma stock a un plato."""
     query = update.callback_query
     if not query or not query.data:
         return
-
     await query.answer()
     partes = query.data.split("_")
     plato_id, cant = int(partes[1]), int(partes[2])
@@ -197,139 +202,136 @@ async def callback_add_stock(update: Update, context: ContextTypes.DEFAULT_TYPE)
         setattr(plato, "stock", stock_actual + cant)
         db.commit()
         db.close()
-
-        await query.edit_message_text(f"✅ Stock actualizado: {stock_actual + cant} unidades.")
+        await query.edit_message_text(f"✅ <b>Stock actualizado:</b> {stock_actual + cant} unidades.", parse_mode="HTML")
     else:
         db.close()
 
+# --- 4. REPORTE DE VENTAS (Issue #40) ---
+async def ver_reporte_ventas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
 
-# --- 4. FSM CREAR NUEVO PLATILLO CON FOTO (Botón '➕ Nuevo Platillo') ---
+    db = SessionLocal()
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    pedidos = db.query(Pedido).all()
+    
+    entregados = [p for p in pedidos if getattr(p, "estado") == EstadoPedido.ENTREGADO]
+    pendientes = [p for p in pedidos if getattr(p, "estado") in (EstadoPedido.PENDIENTE_PAGO, EstadoPedido.EN_PREPARACION, EstadoPedido.EN_CAMINO)]
+    cancelados = [p for p in pedidos if getattr(p, "estado") == EstadoPedido.CANCELADO]
+
+    ingresos = sum(float(getattr(p, "monto_total", 0.0)) for p in entregados)
+    db.close()
+
+    reporte = (
+        f"📊 <b>REPORTE DE OPERACIONES</b>\n"
+        f"📅 <b>Fecha:</b> {fecha_hoy}\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"💵 <b>Ingresos Brutos:</b> Bs. {ingresos:.2f}\n\n"
+        f"📦 <b>Desglose de Pedidos:</b>\n"
+        f"  • ✅ <b>Entregados:</b> {len(entregados)}\n"
+        f"  • ⏳ <b>En proceso:</b> {len(pendientes)}\n"
+        f"  • ❌ <b>Cancelados:</b> {len(cancelados)}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━"
+    )
+    await update.message.reply_text(reporte, parse_mode="HTML")
+
+# --- 5. FSM CREAR NUEVO PLATILLO ---
 async def iniciar_crear_platillo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inicia el flujo FSM para crear un nuevo platillo."""
     if not update.message or context.user_data is None:
         return ConversationHandler.END
-
     context.user_data["nuevo_plato"] = {}
-    await update.message.reply_text("➕ *Nuevo Platillo*\n\nPor favor, escribe el *nombre* del platillo:")
+    await update.message.reply_text("➕ <b>Nuevo Platillo</b>\n\nPor favor, escribe el <b>nombre</b> del platillo:", parse_mode="HTML")
     return NOMBRE_PLATO
 
-
 async def recibir_nombre_plato(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Guarda el nombre y solicita la descripcion."""
     if not update.message or not update.message.text or context.user_data is None:
         return NOMBRE_PLATO
-
     context.user_data["nuevo_plato"]["nombre"] = update.message.text
-    await update.message.reply_text("Escribe una breve *descripcion* del platillo:")
+    await update.message.reply_text("Escribe una breve <b>descripción</b> del platillo:", parse_mode="HTML")
     return DESCRIPCION_PLATO
 
-
 async def recibir_descripcion_plato(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Guarda la descripcion y solicita precio y stock."""
     if not update.message or not update.message.text or context.user_data is None:
         return DESCRIPCION_PLATO
-
     context.user_data["nuevo_plato"]["descripcion"] = update.message.text
-    await update.message.reply_text("Ingresa el *precio* y el *stock* separado por espacio (Ejemplo: `25.50 15`):")
+    await update.message.reply_text("Ingresa el <b>precio</b> y el <b>stock</b> separado por espacio (Ejemplo: <code>25.50 15</code>):", parse_mode="HTML")
     return PRECIO_STOCK_PLATO
 
-
 async def recibir_precio_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Guarda precio y stock y solicita la foto."""
     if not update.message or not update.message.text or context.user_data is None:
         return PRECIO_STOCK_PLATO
-
     try:
         partes = update.message.text.split()
-        precio = float(partes[0])
-        stock = int(partes[1])
-
-        context.user_data["nuevo_plato"]["precio"] = precio
-        context.user_data["nuevo_plato"]["stock"] = stock
-
-        await update.message.reply_text("📷 Ahora envía una *FOTO* del platillo preparado:")
+        context.user_data["nuevo_plato"]["precio"] = float(partes[0])
+        context.user_data["nuevo_plato"]["stock"] = int(partes[1])
+        await update.message.reply_text("📷 Ahora envía una <b>FOTO</b> del platillo preparado:", parse_mode="HTML")
         return FOTO_PLATO
     except Exception:
-        await update.message.reply_text("Formato invalido. Ingresa precio y stock separado por espacio (Ejemplo: `25.50 15`):")
+        await update.message.reply_text("Formato inválido. Ingresa precio y stock separado por espacio (Ejemplo: <code>25.50 15</code>):", parse_mode="HTML")
         return PRECIO_STOCK_PLATO
 
-
 async def recibir_foto_plato(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Descarga la foto y guarda el platillo en la BD."""
     if not update.message or not update.message.photo or context.user_data is None:
         return FOTO_PLATO
-
     foto = update.message.photo[-1]
     datos = context.user_data.get("nuevo_plato", {})
 
-    # Guardar foto
     archivo_foto = await context.bot.get_file(foto.file_id)
     nombre_img = f"plato_{int(datetime.now().timestamp())}.jpg"
     ruta_img = os.path.join(PLATOS_DIR, nombre_img)
     await archivo_foto.download_to_drive(ruta_img)
 
-    # Persistir en BD
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
     db = SessionLocal()
     nuevo = Plato(
         nombre=datos.get("nombre", "Plato"),
         descripcion=datos.get("descripcion", ""),
         precio=datos.get("precio", 0.0),
         stock=datos.get("stock", 0),
-        fecha_menu=fecha_hoy,
+        fecha_menu=datetime.now().strftime("%Y-%m-%d"),
         disponible=True,
         imagen_path=ruta_img,
     )
     db.add(nuevo)
     db.commit()
     db.close()
-
     context.user_data.pop("nuevo_plato", None)
-    await update.message.reply_text(f"🎉 *¡Platillo '{datos.get('nombre')}' registrado y habilitado exitosamente!*")
+    await update.message.reply_text(f"🎉 <b>¡Platillo '{datos.get('nombre')}' registrado y habilitado exitosamente!</b>", parse_mode="HTML")
     return ConversationHandler.END
 
-
-# --- 5. CALLBACKS DE APROBACIÓN Y RECHAZO ---
+# --- 6. CALLBACKS DE APROBACIÓN ---
 async def callback_aprobar_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler para aprobar pago."""
     query = update.callback_query
     if not query or not query.data:
         return
     await query.answer()
     p_id = int(query.data.split("_")[1])
-
     db = SessionLocal()
     p = db.query(Pedido).filter(Pedido.id == p_id).first()
     if p:
         setattr(p, "estado", EstadoPedido.EN_PREPARACION)
         db.commit()
         db.close()
-        await query.edit_message_caption(caption=f"✅ *PEDIDO #{p_id} APROBADO Y EN PREPARACION*", parse_mode="Markdown")
+        await query.edit_message_caption(caption=f"✅ <b>PEDIDO #{p_id} APROBADO Y EN PREPARACIÓN</b>", parse_mode="HTML")
     else:
         db.close()
 
-
 async def callback_rechazar_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler para rechazar pago."""
     query = update.callback_query
     if not query or not query.data:
         return
     await query.answer()
     p_id = int(query.data.split("_")[1])
-
     db = SessionLocal()
     p = db.query(Pedido).filter(Pedido.id == p_id).first()
     if p:
         setattr(p, "estado", EstadoPedido.CANCELADO)
         db.commit()
         db.close()
-        await query.edit_message_caption(caption=f"❌ *PEDIDO #{p_id} RECHAZADO Y CANCELADO*", parse_mode="Markdown")
+        await query.edit_message_caption(caption=f"❌ <b>PEDIDO #{p_id} RECHAZADO Y CANCELADO</b>", parse_mode="HTML")
     else:
         db.close()
 
-
 def registrar_handlers_admin(app: Application) -> None:
-    """Registra handlers de administración en la app de Telegram."""
     conv_nuevo_plato = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^➕ Nuevo Platillo$"), iniciar_crear_platillo)],
         states={
@@ -340,10 +342,10 @@ def registrar_handlers_admin(app: Application) -> None:
         },
         fallbacks=[],
     )
-
     app.add_handler(conv_nuevo_plato)
     app.add_handler(MessageHandler(filters.Regex("^📥 Pagos Pendientes$"), ver_pagos_pendientes_admin))
-    app.add_handler(MessageHandler(filters.Regex("^🍔 Gestionar Menú$"), gestionar_menu_admin))
+    app.add_handler(MessageHandler(filters.Regex("^🍔 Gestionar Menú$"), gestionar_menu_global))
+    app.add_handler(MessageHandler(filters.Regex("^📊 Reporte de Ventas$"), ver_reporte_ventas))
     app.add_handler(CallbackQueryHandler(callback_toggle_disponible, pattern="^toggle_"))
     app.add_handler(CallbackQueryHandler(callback_add_stock, pattern="^addstock_"))
     app.add_handler(CallbackQueryHandler(callback_aprobar_pago, pattern="^aprobar_"))
