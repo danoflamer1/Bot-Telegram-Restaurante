@@ -19,7 +19,7 @@ os.makedirs(PLATOS_DIR, exist_ok=True)
 
 (NOMBRE_PLATO, DESCRIPCION_PLATO, PRECIO_STOCK_PLATO, FOTO_PLATO) = range(10, 14)
 
-# --- 1. NOTIFICACIÓN AUTOMÁTICA AL ADMIN (Refactor HTML - Issue #38) ---
+
 async def notificar_admin_nuevo_comprobante(context: ContextTypes.DEFAULT_TYPE, pedido_id: int):
     db = SessionLocal()
     admins = db.query(Usuario).filter(Usuario.rol == RolUsuario.ADMINISTRADOR).all()
@@ -73,7 +73,7 @@ async def notificar_admin_nuevo_comprobante(context: ContextTypes.DEFAULT_TYPE, 
             except Exception as e:
                 print(f"Error enviando notificación a admin {telegram_id}: {e}")
 
-# --- 2. BANDEJA DE PAGOS PENDIENTES (Refactor HTML) ---
+
 async def ver_pagos_pendientes_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
@@ -113,9 +113,7 @@ async def ver_pagos_pendientes_admin(update: Update, context: ContextTypes.DEFAU
             await update.message.reply_text(texto, reply_markup=markup, parse_mode="HTML")
 
 
-# --- 3. GESTIÓN DE MENÚ GLOBAL (Issue #39) ---
 async def gestionar_menu_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muestra TODOS los platos (históricos y actuales) y permite gestionarlos."""
     if not update.message:
         return
 
@@ -188,6 +186,7 @@ async def callback_toggle_disponible(update: Update, context: ContextTypes.DEFAU
     else:
         db.close()
 
+
 async def callback_add_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not query.data:
@@ -207,9 +206,8 @@ async def callback_add_stock(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         db.close()
 
-# --- 4. REPORTE DE VENTAS (Issue #40) ---
+
 async def ver_reporte_ventas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Genera un reporte consolidado con botones interactivos para los pedidos."""
     chat_id = update.effective_chat.id if update.effective_chat else None
     if not chat_id:
         return
@@ -228,7 +226,6 @@ async def ver_reporte_ventas(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     ingresos = sum(float(getattr(p, "monto_total", 0.0)) for p in entregados)
     
-    # ⚡ Creamos un teclado interactivo con los últimos 15 pedidos (para no saturar la pantalla)
     teclado = []
     for p in pedidos[-15:]:
         p_id = getattr(p, "id")
@@ -255,16 +252,15 @@ async def ver_reporte_ventas(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     markup = InlineKeyboardMarkup(teclado) if teclado else None
 
-    # ⚡ SOLUCIÓN LINTER-FRIENDLY: Usamos context.bot.send_message con el chat_id validado
     if update.callback_query and update.callback_query.message:
         await update.callback_query.edit_message_text(text=reporte, reply_markup=markup, parse_mode="HTML")
     else:
         await context.bot.send_message(chat_id=chat_id, text=reporte, reply_markup=markup, parse_mode="HTML")
+
+
 async def callback_detalle_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Consulta los productos exactos de un pedido y muestra su ticket."""
     query = update.callback_query
     
-    # ⚡ SOLUCIÓN LINTER: Validamos que 'query' exista antes de hacer answer()
     if not query or not query.data:
         return
         
@@ -280,7 +276,6 @@ async def callback_detalle_pedido(update: Update, context: ContextTypes.DEFAULT_
     cliente = db.query(Usuario).filter(Usuario.id == getattr(pedido, "cliente_id")).first()
     nombre_cliente = getattr(cliente, "nombre", "Desconocido") if cliente else "Desconocido"
     
-    # Buscar los productos comprados en este pedido
     detalles = db.query(DetallePedido).filter(DetallePedido.pedido_id == pedido_id).all()
     lista_items = []
     
@@ -307,19 +302,19 @@ async def callback_detalle_pedido(update: Update, context: ContextTypes.DEFAULT_
         f"━━━━━━━━━━━━━━━━━━━"
     )
     
-    # Botón para regresar al menú de reportes
     teclado = [[InlineKeyboardButton("🔙 Volver al Reporte", callback_data="volver_reporte")]]
     
-    # ⚡ Extra protección linter para el mensaje
     if query.message:
         await query.edit_message_text(text=detalle_texto, reply_markup=InlineKeyboardMarkup(teclado), parse_mode="HTML")
-# --- 5. FSM CREAR NUEVO PLATILLO ---
+
+
 async def iniciar_crear_platillo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or context.user_data is None:
         return ConversationHandler.END
     context.user_data["nuevo_plato"] = {}
     await update.message.reply_text("➕ <b>Nuevo Platillo</b>\n\nPor favor, escribe el <b>nombre</b> del platillo:", parse_mode="HTML")
     return NOMBRE_PLATO
+
 
 async def recibir_nombre_plato(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text or context.user_data is None:
@@ -328,12 +323,14 @@ async def recibir_nombre_plato(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("Escribe una breve <b>descripción</b> del platillo:", parse_mode="HTML")
     return DESCRIPCION_PLATO
 
+
 async def recibir_descripcion_plato(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text or context.user_data is None:
         return DESCRIPCION_PLATO
     context.user_data["nuevo_plato"]["descripcion"] = update.message.text
     await update.message.reply_text("Ingresa el <b>precio</b> y el <b>stock</b> separado por espacio (Ejemplo: <code>25.50 15</code>):", parse_mode="HTML")
     return PRECIO_STOCK_PLATO
+
 
 async def recibir_precio_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text or context.user_data is None:
@@ -347,6 +344,7 @@ async def recibir_precio_stock(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception:
         await update.message.reply_text("Formato inválido. Ingresa precio y stock separado por espacio (Ejemplo: <code>25.50 15</code>):", parse_mode="HTML")
         return PRECIO_STOCK_PLATO
+
 
 async def recibir_foto_plato(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.photo or context.user_data is None:
@@ -376,7 +374,7 @@ async def recibir_foto_plato(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(f"🎉 <b>¡Platillo '{datos.get('nombre')}' registrado y habilitado exitosamente!</b>", parse_mode="HTML")
     return ConversationHandler.END
 
-# --- 6. CALLBACKS DE APROBACIÓN ---# --- 6. CALLBACKS DE APROBACIÓN ---
+
 async def callback_aprobar_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not query.data:
@@ -393,13 +391,13 @@ async def callback_aprobar_pago(update: Update, context: ContextTypes.DEFAULT_TY
         
         texto_estado = f"✅ <b>PEDIDO #{p_id} APROBADO Y EN PREPARACIÓN</b>"
         
-        # ⚡ SOLUCIÓN SEGURA: Verificamos que el mensaje exista y extraemos 'photo' con getattr
         if query.message and getattr(query.message, "photo", None):
             await query.edit_message_caption(caption=texto_estado, parse_mode="HTML")
         else:
             await query.edit_message_text(text=texto_estado, parse_mode="HTML")
     else:
         db.close()
+
 
 async def callback_rechazar_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -417,13 +415,14 @@ async def callback_rechazar_pago(update: Update, context: ContextTypes.DEFAULT_T
         
         texto_estado = f"❌ <b>PEDIDO #{p_id} RECHAZADO Y CANCELADO</b>"
         
-        # ⚡ SOLUCIÓN SEGURA: Verificamos que el mensaje exista y extraemos 'photo' con getattr
         if query.message and getattr(query.message, "photo", None):
             await query.edit_message_caption(caption=texto_estado, parse_mode="HTML")
         else:
             await query.edit_message_text(text=texto_estado, parse_mode="HTML")
     else:
         db.close()
+
+
 def registrar_handlers_admin(app: Application) -> None:
     conv_nuevo_plato = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^➕ Nuevo Platillo$"), iniciar_crear_platillo)],

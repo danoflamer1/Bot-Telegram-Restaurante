@@ -52,16 +52,13 @@ async def comando_start_router(update: Update, context: ContextTypes.DEFAULT_TYP
     nombre = getattr(user, "first_name", "Usuario")
     nombre_completo = getattr(user, "full_name", nombre)
 
-    # 1. Limpiar memoria de conversación anterior
     if context.user_data is not None:
         context.user_data.clear()
 
-    # 2. Obtener rol actualizado de la BD
     usuario = obtener_o_registrar_usuario(str(user.id), nombre_completo)
     rol = getattr(usuario, "rol", RolUsuario.CLIENTE)
     teclado = obtener_teclado_por_rol(rol)
 
-    # 3. Mensajes personalizados por rol
     if rol == RolUsuario.ADMINISTRADOR:
         mensaje = (
             f"👑 *¡Panel de Administración — Chef {nombre}!* 👨‍🍳\n\n"
@@ -81,7 +78,7 @@ async def comando_start_router(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await update.message.reply_text(mensaje, reply_markup=teclado, parse_mode="Markdown")
     
-    # Si es cliente entra al estado 0, si es admin/repartidor finaliza FSM de cliente
+ 
     if rol == RolUsuario.CLIENTE:
         return 0
     return ConversationHandler.END

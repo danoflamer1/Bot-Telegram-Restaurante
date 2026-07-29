@@ -217,14 +217,13 @@ async def rastreador_ubicacion_en_vivo(update: Update, context: ContextTypes.DEF
                     longitude=lon
                 )
             except Exception:
-                pass # Silenciamos errores por si la ubicación no cambió lo suficiente
+                pass 
 
-# En tu función registrar_handlers_repartidor, quitas el de filters.LOCATION y pones:
+
 def registrar_handlers_repartidor(app: Application) -> None:
     app.add_handler(CommandHandler("pedidos_pendientes", comando_pedidos_pendientes))
     app.add_handler(MessageHandler(filters.Regex("^🛵 Pedidos Pendientes$"), comando_pedidos_pendientes))
     
-    # ⚡ Usamos TypeHandler porque es 100% seguro para atrapar el movimiento en vivo
     app.add_handler(TypeHandler(Update, rastreador_ubicacion_en_vivo))
     
     app.add_handler(CallbackQueryHandler(callback_tomar_pedido, pattern="^tomar_"))
@@ -258,7 +257,6 @@ async def callback_entregado(update: Update, context: ContextTypes.DEFAULT_TYPE)
 def registrar_handlers_repartidor(app: Application) -> None:
     app.add_handler(CommandHandler("pedidos_pendientes", comando_pedidos_pendientes))
     app.add_handler(MessageHandler(filters.Regex("^🛵 Pedidos Pendientes$"), comando_pedidos_pendientes))
-    # ⚡ Escucha de ubicación para reenviar al cliente (Issue #41)
     app.add_handler(MessageHandler(filters.LOCATION, rastreador_ubicacion_en_vivo))
     
     app.add_handler(CallbackQueryHandler(callback_tomar_pedido, pattern="^tomar_"))

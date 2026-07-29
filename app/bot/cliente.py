@@ -21,12 +21,10 @@ from app.core.logica import calcular_total_carrito, validar_stock_disponible
 from app.models.modelos import Usuario, Plato, Pedido, DetallePedido, RolUsuario, EstadoPedido
 from app.bot.admin import notificar_admin_nuevo_comprobante
 
-# Rutas de archivos
 COMPROBANTES_DIR = os.path.join("docs", "comprobantes")
 os.makedirs(COMPROBANTES_DIR, exist_ok=True)
 RUTA_QR_PAGO = os.path.join("docs", "qr_pago.png")
 
-# Estados para la FSM
 (
     SELECCIONANDO_PLATOS,
     SOLICITANDO_UBICACION,
@@ -43,7 +41,6 @@ async def notificar_cliente_cambio_estado(context: ContextTypes.DEFAULT_TYPE, pe
         db.close()
         return
 
-    # Usamos getattr(pedido, "cliente_id") para alinearnos a tu modelo
     usuario = db.query(Usuario).filter(Usuario.id == getattr(pedido, "cliente_id")).first()
     if not usuario or not getattr(usuario, "telegram_id"):
         db.close()
@@ -376,7 +373,6 @@ async def registrar_pedido_bd(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         codigo_seg = f"PED-{int(datetime.now().timestamp())}"
 
-        # ⚡ 1. Uso exacto de cliente_id de tu modelo
         nuevo_pedido = Pedido(
             codigo_seguimiento=codigo_seg,
             cliente_id=getattr(usuario, "id"),
@@ -397,7 +393,6 @@ async def registrar_pedido_bd(update: Update, context: ContextTypes.DEFAULT_TYPE
                 precio_plato = float(getattr(plato, "precio", 0.0))
                 subtotal_item = precio_plato * cantidad
 
-                # ⚡ 2. Asignación explícita de subtotal para DetallePedido
                 detalle = DetallePedido(
                     pedido_id=pedido_id,
                     plato_id=getattr(plato, "id"),
@@ -487,7 +482,6 @@ async def recibir_comprobante(update: Update, context: ContextTypes.DEFAULT_TYPE
         db.commit()
     db.close()
 
-    # Disparar notificación automática al administrador
     await notificar_admin_nuevo_comprobante(context, pedido_id)
 
     from app.bot.router import obtener_teclado_por_rol
@@ -590,11 +584,8 @@ def crear_aplicacion_bot(token: str) -> Application:
         per_message=False,
     )
 
-    # ⚡ EL ORDEN ES CRÍTICO: 
-    # 1. Primero registramos la máquina de estados del cliente
     app.add_handler(conv_handler)
 
-    # 2. Después registramos Admin y Repartidor como opciones globales
     registrar_handlers_admin(app)
     registrar_handlers_repartidor(app)
 
